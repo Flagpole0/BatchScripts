@@ -1,0 +1,209 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+title Norm's Last Show - mapping network drives
+mode con: cols=72 lines=42 >nul 2>&1
+
+rem ====================== CONFIG ======================
+rem  Server name exactly as it appears in the UNC paths.
+set "SERVER=\\yourserverippath\"
+
+rem  Credential user prefix. Leave blank to store just the username.
+set "DOMAIN=%SERVER%"
+
+rem  Leave NAS_USER blank to be asked. Leave NAS_PASS blank to be
+rem  prompted by cmdkey (recommended: keeps the password out of this file).
+rem  If you do set it here: no ! characters, and write any % as %%.
+set "NAS_USER="
+set "NAS_PASS="
+
+rem  Seconds per animation frame (each drive = 2 frames).
+set "STEP=1"
+
+rem  Drives:  LETTER;share path under \\%SERVER%\
+rem  {user} is replaced with the username. Add MAP_5, MAP_6 ... as needed.
+set "MAP_1=H;homes\{user}"
+set "MAP_2=M;media"
+set "MAP_3=P;public"
+set "MAP_4=S;scans"
+rem ====================================================
+
+rem  Marquee lettering (34 chars wide; bulbs are added around it).
+set "MQ1= _  _   ___   ___  __  __  _  ___ "
+set "MQ2=| \| | / _ \ | _ \|  \/  |( )/ __|"
+set "MQ3=| .` || (_) ||   /| |\/| ||/ \__ \"
+set "MQ4=|_|\_| \___/ |_|_\|_|  |_|   |___/"
+set "MQ5=      ~ L A S T   S H O W ~       "
+
+if not defined NAS_USER set /p "NAS_USER=Username for \\%SERVER%: "
+if not defined NAS_USER (echo No username given. & exit /b 1)
+if defined DOMAIN (set "CRED_USER=%DOMAIN%\%NAS_USER%") else (set "CRED_USER=%NAS_USER%")
+
+rem ---------- Credential Manager ----------
+cmdkey /delete:%SERVER% >nul 2>&1
+if defined NAS_PASS goto :cred_var
+echo Enter the password for %CRED_USER%:
+cmdkey /add:%SERVER% /user:%CRED_USER% /pass
+goto :cred_check
+:cred_var
+cmdkey /add:%SERVER% /user:%CRED_USER% /pass:"!NAS_PASS!" >nul
+:cred_check
+if errorlevel 1 (
+    echo Could not store the credential in Credential Manager.
+    pause
+    exit /b 1
+)
+set "NAS_PASS="
+
+rem ---------- Build the set list ----------
+set "COUNT=0"
+for /l %%i in (1,1,26) do if defined MAP_%%i set "COUNT=%%i"
+if "%COUNT%"=="0" (echo No drives configured. & exit /b 1)
+for /l %%i in (1,1,%COUNT%) do call :prep %%i
+
+rem ---------- The show ----------
+set "CAPTION=Credentials stored. House lights down..."
+call :frame 0 0 0
+call :wait
+for /l %%n in (1,1,4) do (
+    set "CAPTION=Stage light %%n of 4..."
+    call :frame %%n 0 0
+    call :wait
+)
+set "CAPTION=Please welcome to the stage... the Drive Mapper"
+call :frame 4 1 3
+call :wait
+
+set "FAILS=0"
+for /l %%i in (1,1,%COUNT%) do (
+    set "ST_%%i= ~~ "
+    set "CAPTION=Now playing: !DL_%%i!:  -  track %%i of %COUNT%"
+    call :frame A 1 1
+    call :wait
+    call :map_one %%i
+    call :frame B 2 2
+    call :wait
+)
+
+set "CAPTION=ENCORE - all %COUNT% drives mapped. Goodnight, %SERVER%"
+if not "!FAILS!"=="0" set "CAPTION=Show's over - !FAILS! drive[s] failed. Check the set list."
+call :frame 4 1 3
+echo.
+pause
+exit /b %FAILS%
+
+
+rem ==================== SUBROUTINES ====================
+
+:prep
+for /f "tokens=1,* delims=;" %%a in ("!MAP_%1!") do (
+    set "DL_%1=%%a"
+    set "SH=%%b"
+)
+set "SH=!SH:{user}=%NAS_USER%!"
+set "UNC_%1=\\%SERVER%\!SH!"
+set "ST_%1= .. "
+exit /b
+
+:map_one
+set "D=!DL_%1!"
+set "U=!UNC_%1!"
+net use !D!: /delete /y >nul 2>&1
+net use !D!: "!U!" /persistent:yes >nul 2>&1
+if errorlevel 1 (
+    set "ST_%1=FAIL"
+    set /a FAILS+=1
+) else (
+    set "ST_%1= OK "
+)
+exit /b
+
+:wait
+timeout /t %STEP% /nobreak >nul
+exit /b
+
+rem  %1 = lights: 0-4 lit count, A/B = alternating flicker
+rem  %2 = pose:   0 empty stage, 1 strum up, 2 strum down
+rem  %3 = crowd:  0 none, 1 / 2 alternating, 3 everyone up
+:frame
+set "LT=%~1"
+set "RIG=  "
+set "BM1=  "
+set "BM2=  "
+for /l %%k in (1,1,4) do (
+    set "ON=0"
+    if "!LT!"=="A" (
+        set /a "ON=%%k %% 2"
+    ) else if "!LT!"=="B" (
+        set /a "ON=(%%k+1) %% 2"
+    ) else if %%k LEQ !LT! (
+        set "ON=1"
+    )
+    if "!ON!"=="1" (
+        set "RIG=!RIG!===[*]==="
+        set "BM1=!BM1!   / \   "
+        set "BM2=!BM2!  /   \  "
+    ) else (
+        set "RIG=!RIG!===[ ]==="
+        set "BM1=!BM1!         "
+        set "BM2=!BM2!         "
+    )
+)
+rem  Marquee bulbs: dark until the lights come up, chase during the song.
+set "BU1=o"
+set "BU2=o"
+if "!LT!"=="0" (set "BU1=." & set "BU2=.")
+if "!LT!"=="A" set "BU2=."
+if "!LT!"=="B" set "BU1=."
+set "MQTOP=  "
+for /l %%k in (1,1,19) do set "MQTOP=!MQTOP!!BU1!!BU2!"
+call :pose_%~2
+set "CROWD="
+if "%~3"=="1" set "CROWD=    \o/    o    \o/    o    \o/    o"
+if "%~3"=="2" set "CROWD=     o    \o/    o    \o/    o    \o/"
+if "%~3"=="3" set "CROWD=    \o/   \o/   \o/   \o/   \o/   \o/"
+cls
+echo.
+echo(!MQTOP!
+echo(  !BU2! !MQ1! !BU1!
+echo(  !BU1! !MQ2! !BU2!
+echo(  !BU2! !MQ3! !BU1!
+echo(  !BU1! !MQ4! !BU2!
+echo(  !BU2! !MQ5! !BU1!
+echo(!MQTOP!
+echo(!RIG!
+echo(!BM1!
+echo(!BM2!
+for /l %%k in (1,1,8) do echo(!P%%k!
+echo   ====================================
+echo(!CROWD!
+echo.
+echo   !CAPTION!
+echo.
+for /l %%k in (1,1,%COUNT%) do echo(   [!ST_%%k!]  !DL_%%k!:  !UNC_%%k!
+exit /b
+
+:pose_0
+for /l %%k in (1,1,8) do set "P%%k="
+exit /b
+
+:pose_1
+set "P1=                 .-."
+set "P2=                (   )"
+set "P3=                 ) (       /"
+set "P4=              __/   \_____/"
+set "P5=                |  ==[]=========#"
+set "P6=                |   |"
+set "P7=                /   \"
+set "P8=               /     \"
+exit /b
+
+:pose_2
+set "P1=                 .-."
+set "P2=                (   )"
+set "P3=                 ) ("
+set "P4=              __/   \___"
+set "P5=                |  ==[]==\======#"
+set "P6=                |   |     \"
+set "P7=                /   \"
+set "P8=               /     \"
+exit /b
